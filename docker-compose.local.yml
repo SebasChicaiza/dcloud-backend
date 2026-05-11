@@ -1,0 +1,105 @@
+version: "3.9"
+
+# Local demo: Redis + 3 nodes + a shared "control plane" volume that
+# replaces SCP. Drop A.clean and B.clean into ./control-plane/inputs/
+# before starting. Final output appears in ./control-plane/runs/<run_id>/final/.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  node1:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ID: node-1
+      NODE_PRIORITY: 100
+      CAN_BE_LEADER: "true"
+      LEADER_CAN_PROCESS: "true"
+      WORKER_CONCURRENCY: auto
+      MAX_CONCURRENCY: 4
+      REDIS_URL: redis://redis:6379/0
+      RUN_ID: run-001
+      CONTROL_PLANE_HOST: local
+      CONTROL_PLANE_BASE_DIR: /data/dna-demo
+      CONTROL_PLANE_LOCAL_DIR: /control-plane
+      LOCAL_DATA_DIR: /worker-cache
+      INPUT_A_NAME: A.clean
+      INPUT_B_NAME: B.clean
+      CHUNK_SIZE_BYTES: "1048576"   # 1 MiB for quick demo
+      LEADER_LOCK_TTL_MS: "7000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      NODE_DEAD_AFTER_SECONDS: "10"
+    volumes:
+      - ./control-plane:/control-plane
+      - node1-cache:/worker-cache
+
+  node2:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ID: node-2
+      NODE_PRIORITY: 90
+      CAN_BE_LEADER: "true"
+      LEADER_CAN_PROCESS: "true"
+      WORKER_CONCURRENCY: auto
+      MAX_CONCURRENCY: 4
+      REDIS_URL: redis://redis:6379/0
+      RUN_ID: run-001
+      CONTROL_PLANE_HOST: local
+      CONTROL_PLANE_BASE_DIR: /data/dna-demo
+      CONTROL_PLANE_LOCAL_DIR: /control-plane
+      LOCAL_DATA_DIR: /worker-cache
+      INPUT_A_NAME: A.clean
+      INPUT_B_NAME: B.clean
+      CHUNK_SIZE_BYTES: "1048576"
+      LEADER_LOCK_TTL_MS: "7000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      NODE_DEAD_AFTER_SECONDS: "10"
+    volumes:
+      - ./control-plane:/control-plane
+      - node2-cache:/worker-cache
+
+  node3:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ID: node-3
+      NODE_PRIORITY: 80
+      CAN_BE_LEADER: "true"
+      LEADER_CAN_PROCESS: "true"
+      WORKER_CONCURRENCY: auto
+      MAX_CONCURRENCY: 4
+      REDIS_URL: redis://redis:6379/0
+      RUN_ID: run-001
+      CONTROL_PLANE_HOST: local
+      CONTROL_PLANE_BASE_DIR: /data/dna-demo
+      CONTROL_PLANE_LOCAL_DIR: /control-plane
+      LOCAL_DATA_DIR: /worker-cache
+      INPUT_A_NAME: A.clean
+      INPUT_B_NAME: B.clean
+      CHUNK_SIZE_BYTES: "1048576"
+      LEADER_LOCK_TTL_MS: "7000"
+      HEARTBEAT_INTERVAL_SECONDS: "2"
+      NODE_DEAD_AFTER_SECONDS: "10"
+    volumes:
+      - ./control-plane:/control-plane
+      - node3-cache:/worker-cache
+
+volumes:
+  node1-cache:
+  node2-cache:
+  node3-cache:

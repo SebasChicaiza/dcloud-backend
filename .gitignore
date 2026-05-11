@@ -1,0 +1,61 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+
+# --- Virtualenvs ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Tests / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- SSH keys / credentials (defensive) ---
+id_rsa
+id_rsa.pub
+*.pem
+*.key
+
+# --- Runtime data (large files / demo artifacts) ---
+control-plane/
+worker-cache/
+/data/
+*.clean
+*.fna
+*.out
+*.partial
+
+# --- Docker ---
+.docker/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# --- Claude Code ---
+.claude/
