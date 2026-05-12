@@ -116,7 +116,14 @@ class Leader:
                 try:
                     chunk = json.loads(fields.get("chunk", "{}"))
                     if chunk:
-                        self.state.publish_job(self.cfg.run_id, {**chunk, "reclaimed": True})
+                        chunk_id = chunk.get("chunk_id")
+                        # ✅ FIX: Check if chunk is already DONE before re-publishing
+                        existing = self.state.get_chunk(self.cfg.run_id, chunk_id)
+                        if existing.get("status") == ChunkStatus.DONE.value:
+                            log_event(log, logging.INFO, "reclaim.skip_done",
+                                      f"Skipping already-done chunk {chunk_id}")
+                        else:
+                            self.state.publish_job(self.cfg.run_id, {**chunk, "reclaimed": True})
                     self.state.ack_job(self.cfg.run_id, msg_id)
                 except Exception:
                     log.exception("Failed to re-publish reclaimed job %s", msg_id)

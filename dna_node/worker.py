@@ -140,6 +140,17 @@ class Worker:
 
     def _submit(self, in_flight: dict, msg_id: str, chunk: dict) -> None:
         chunk_id = chunk["chunk_id"]
+        
+        # ✅ FIX: Check if chunk is already DONE to prevent re-processing duplicates
+        existing = self.state.get_chunk(self.cfg.run_id, chunk_id)
+        if existing.get("status") == ChunkStatus.DONE.value:
+            log_event(log, logging.WARNING, "chunk.already_done",
+                      f"Chunk already completed; skipping. chunk={chunk_id}",
+                      chunk_id=chunk_id)
+            # Still ACK to remove from queue, but don't re-process
+            self.state.ack_job(self.cfg.run_id, msg_id)
+            return
+        
         self.state.set_chunk(self.cfg.run_id, chunk_id, {
             "status": ChunkStatus.PROCESSING.value,
             "worker": self.cfg.node_id,

@@ -154,7 +154,12 @@ class LeaderElection:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                if self._is_leader:
+                # ✅ FIX: Read _is_leader under lock to prevent race condition
+                with self._lock:
+                    is_leader = self._is_leader
+                    token = self._token
+                
+                if is_leader:
                     if not self._renew():
                         self._step_down("renew failed (lock taken or expired)")
                 else:
