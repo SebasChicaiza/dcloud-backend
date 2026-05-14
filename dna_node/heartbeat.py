@@ -2,14 +2,16 @@
 
 Static node info (hostname, OS, CPU model, total memory, python version, ...)
 is published once at startup to `nodes:{id}:info` so the frontend can show it
-without us re-sending it every heartbeat. Heartbeats themselves carry only
-dynamic state (role/status/current_jobs/etc).
+without us re-sending it every heartbeat. Heartbeats themselves are written as
+STRING with TTL to nodes:{id}, with dynamic state (role/status/metrics/timestamp).
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
+import psutil
 import socket
 import sys
 import threading
@@ -102,19 +104,25 @@ class Heartbeat:
         while not self._stop.is_set():
             try:
                 metrics = self._metrics() or {}
+                # Get CPU and memory usage
+                cpu_usage = psutil.cpu_percent(interval=0.1)
+                mem_info = psutil.virtual_memory()
+                memory_usage = mem_info.percent
+                
+                # Payload in exact format expected by dashboard
                 payload = {
-                    "node_id": self.cfg.node_id,
-                    "role": self._role(),
-                    "priority": self.cfg.node_priority,
+                    "nodeId": self.cfg.node_id,
                     "status": self._status(),
-                    "cpu_count": os.cpu_count() or 1,
+                    "priority": self.cfg.node_priority,
+                    "canBeLeader": self.cfg.can_be_leader,
+                    "cpuUsage": int(cpu_usage),
+                    "memoryUsage": int(memory_usage),
                     "concurrency": self.cfg.worker_concurrency,
-                    "current_jobs": metrics.get("current_jobs", 0),
-                    "completed_jobs": metrics.get("completed_jobs", 0),
-                    "failed_jobs": metrics.get("failed_jobs", 0),
-                    "processed_bases": metrics.get("processed_bases", 0),
-                    "last_seen": time.time(),
-                    "run_id": self.cfg.run_id,
+                    "activeJobs": metrics.get("current_jobs", 0),
+                    "completedJobs": metrics.get("completed_jobs", 0),
+                    "failedJobs": metrics.get("failed_jobs", 0),
+                    "provider": self.cfg.provider,
+                    "timestamp": int(time.time() * 1000),  # milliseconds Unix
                 }
                 self.state.write_heartbeat(self.cfg.node_id, payload)
             except Exception:

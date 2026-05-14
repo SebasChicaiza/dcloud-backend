@@ -10,6 +10,7 @@ from typing import Any
 class RunStatus(str, Enum):
     PREPARING = "PREPARING"
     RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
     REDUCING = "REDUCING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"

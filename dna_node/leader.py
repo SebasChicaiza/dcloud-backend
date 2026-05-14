@@ -51,11 +51,21 @@ class Leader:
         log_event(log, logging.INFO, "leader.start", "Assuming leader duties")
         self.state.set_run_status(self.cfg.run_id, RunStatus.PREPARING.value)
         manifest = self._ensure_run_assets()
+        run_start_time = time.time()
         self.state.set_run_status(self.cfg.run_id, RunStatus.RUNNING.value)
+        
+        # Publish event
+        self.state.publish_event(
+            self.cfg.run_id,
+            event_type="run_started",
+            severity="info",
+            node_id=self.cfg.node_id,
+            message=f"Run started with {len(manifest.chunks)} chunks"
+        )
 
         while not self._stop.is_set() and self._is_leader():
             try:
-                self._tick(manifest)
+                self._tick(manifest, run_start_time)
             except Exception:
                 log.exception("Leader tick failed")
             # End condition
@@ -64,6 +74,13 @@ class Leader:
                 break
             if self.state.get_run_status(self.cfg.run_id) == RunStatus.CANCELLED.value:
                 log_event(log, logging.WARNING, "leader.cancelled", "Run cancelled")
+                self.state.publish_event(
+                    self.cfg.run_id,
+                    event_type="run_cancelled",
+                    severity="warning",
+                    node_id=self.cfg.node_id,
+                    message="Run has been cancelled"
+                )
                 break
             self._stop.wait(2.0)
 
@@ -76,10 +93,14 @@ class Leader:
         return ensure_manifest_and_jobs(self.cfg, self.state, self.scp)
 
     # ---- per-tick duties ----
-    def _tick(self, manifest: Manifest) -> None:
+    def _tick(self, manifest: Manifest, run_start_time: float = None) -> None:
+        if run_start_time is None:
+            run_start_time = time.time()
         self._reap_dead_nodes()
         self._reclaim_stale_jobs()
         self._process_commands()
+        # Update run stats for dashboard
+        self.state.update_run_stats(self.cfg.run_id, len(manifest.chunks), run_start_time)
         if self.state.get_meta(self.cfg.run_id, "rebuild_final") == "1":
             self.state.set_meta(self.cfg.run_id, "rebuild_final", "0")
             if self.state.all_chunks_done(self.cfg.run_id, len(manifest.chunks)):
@@ -181,6 +202,17 @@ class Leader:
         self.state.set_run_status(self.cfg.run_id, RunStatus.COMPLETED.value)
         log_event(log, logging.INFO, "reduce.done",
                   f"similarity={pct:.4f}% final={final_path}")
+        
+        # Publish run completion event
+        self.state.publish_event(
+            self.cfg.run_id,
+            event_type="run_completed",
+            severity="success",
+            node_id=self.cfg.node_id,
+            message=f"Run completed successfully with {pct:.2f}% similarity",
+            matches=matches,
+            mismatches=mismatches
+        )
 
     def _validate_partials(self, manifest: Manifest) -> bool:
         """Stream each remote partial through SHA256 and compare to expected."""

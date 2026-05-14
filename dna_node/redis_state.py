@@ -37,12 +37,11 @@ class RedisState:
         return bool(self.r.ping())
 
     # ---- node heartbeat ----
-    def write_heartbeat(self, node_id: str, fields: dict[str, Any]) -> None:
-        fields = {k: ("" if v is None else v) for k, v in fields.items()}
-        pipe = self.r.pipeline()
-        pipe.hset(k_node(node_id), mapping=fields)
-        pipe.sadd(k_nodes_active(), node_id)
-        pipe.execute()
+    def write_heartbeat(self, node_id: str, payload: dict[str, Any]) -> None:
+        """Write heartbeat as STRING with TTL 30s (dashboard expects this format)."""
+        heartbeat_json = json.dumps(payload)
+        self.r.setex(k_node(node_id), 30, heartbeat_json)  # TTL 30 seconds
+        self.r.sadd(k_nodes_active(), node_id)
 
     def get_node(self, node_id: str) -> dict[str, str]:
         return self.r.hgetall(k_node(node_id))
@@ -78,6 +77,47 @@ class RedisState:
 
     def get_stats(self, run_id: str) -> dict[str, str]:
         return self.r.hgetall(k_run_stats(run_id))
+
+    def update_run_stats(self, run_id: str, total_chunks: int, started_at: float) -> None:
+        """Update run stats with all required dashboard fields."""
+        stats = self.get_stats(run_id)
+        
+        # Get current chunk states
+        pending = int(stats.get("pending_chunks", 0))
+        processing = int(stats.get("processing_chunks", 0))
+        done = int(stats.get("completed_chunks", 0))
+        failed = int(stats.get("failed_chunks", 0))
+        retrying = int(stats.get("retrying_chunks", 0))
+        
+        # Calculate similarity
+        matches = int(stats.get("matches", 0))
+        mismatches = int(stats.get("mismatches", 0))
+        total_bases = int(stats.get("total_bases", 0))
+        similarity = (matches / total_bases * 100.0) if total_bases > 0 else 0.0
+        
+        # Get current run status
+        status = self.get_run_status(run_id) or "IDLE"
+        
+        # Build complete stats hash
+        updated = {
+            "status": status,
+            "totalBases": total_bases,
+            "totalChunks": total_chunks,
+            "completedChunks": done,
+            "pendingChunks": pending,
+            "processingChunks": processing,
+            "failedChunks": failed,
+            "retryingChunks": retrying,
+            "matches": matches,
+            "mismatches": mismatches,
+            "similarityPercentage": round(similarity, 2),
+            "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started_at)),
+        }
+        
+        pipe = self.r.pipeline()
+        for k, v in updated.items():
+            pipe.hset(k_run_stats(run_id), k, str(v))
+        pipe.execute()
 
     # ---- chunk state ----
     def set_chunk(self, run_id: str, chunk_id: str, fields: dict[str, Any]) -> None:
@@ -141,6 +181,29 @@ class RedisState:
         return res[0][1]
 
     # ---- events ----
-    def publish_event(self, run_id: str, event: dict[str, Any]) -> None:
+    def publish_event(self, run_id: str, event_type: str, severity: str, 
+                     node_id: str, message: str, chunk_id: str = "", **extra) -> None:
+        """Publish event to stream in dashboard format.
+        
+        Args:
+            run_id: Run ID
+            event_type: e.g., "chunk_completed", "chunk_failed", "worker_paused", etc.
+            severity: "info" | "success" | "warning" | "error"
+            node_id: Worker node ID that triggered the event
+            message: Human-readable message
+            chunk_id: Optional chunk ID if event is chunk-related
+            **extra: Any additional fields to include
+        """
+        event = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "severity": severity,
+            "eventType": event_type,
+            "nodeId": node_id,
+            "message": message,
+        }
+        if chunk_id:
+            event["chunkId"] = chunk_id
+        event.update(extra)
+        
         self.r.xadd(k_stream_events(run_id), {"event": json.dumps(event)},
                     maxlen=10_000, approximate=True)

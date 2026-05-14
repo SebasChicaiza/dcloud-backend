@@ -45,6 +45,7 @@ class Worker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._pool: ProcessPoolExecutor | None = None
+        self._last_reported_status: str | None = None  # Track for event publishing
 
     # ---- lifecycle ----
     def start(self) -> None:
@@ -94,6 +95,24 @@ class Worker:
 
         while not self._stop.is_set():
             status = self._control_status()
+            
+            # Publish event on status change
+            if status != self._last_reported_status:
+                self._last_reported_status = status
+                severity_map = {
+                    WorkerStatus.ACTIVE.value: "info",
+                    WorkerStatus.PAUSED.value: "warning",
+                    WorkerStatus.DRAINING.value: "warning",
+                    WorkerStatus.DISABLED.value: "error",
+                }
+                self.state.publish_event(
+                    self.cfg.run_id,
+                    event_type="worker_status_changed",
+                    severity=severity_map.get(status, "info"),
+                    node_id=self.cfg.node_id,
+                    message=f"Worker status changed to {status}"
+                )
+            
             if status == WorkerStatus.DISABLED.value:
                 log_event(log, logging.INFO, "worker.disabled", "Sleeping (disabled)")
                 self._stop.wait(2.0)
@@ -188,6 +207,15 @@ class Worker:
                 self.state.set_chunk(self.cfg.run_id, chunk["chunk_id"], {
                     "status": ChunkStatus.FAILED.value, "error": str(e),
                 })
+                # Publish failure event
+                self.state.publish_event(
+                    self.cfg.run_id,
+                    event_type="chunk_failed",
+                    severity="error",
+                    node_id=self.cfg.node_id,
+                    message=f"Chunk {chunk['chunk_id']} processing failed: {e}",
+                    chunk_id=chunk["chunk_id"]
+                )
                 # No ACK -> will be reclaimed.
                 continue
             self._finalize_chunk(msg_id, chunk, result)
@@ -238,8 +266,20 @@ class Worker:
         self.state.incr_stat(self.cfg.run_id, "matches", result.matches)
         self.state.incr_stat(self.cfg.run_id, "mismatches", result.mismatches)
         self.state.incr_stat(self.cfg.run_id, "total_bases", result.total_bases)
-        self.state.incr_stat(self.cfg.run_id, "chunks_done", 1)
+        self.state.incr_stat(self.cfg.run_id, "completed_chunks", 1)
         self.state.ack_job(self.cfg.run_id, msg_id)
+
+        # Publish success event
+        self.state.publish_event(
+            self.cfg.run_id,
+            event_type="chunk_completed",
+            severity="success",
+            node_id=self.cfg.node_id,
+            message=f"Chunk {chunk_id} completed: {result.matches}/{result.total_bases} matches",
+            chunk_id=chunk_id,
+            matches=result.matches,
+            mismatches=result.mismatches
+        )
 
         with self.metrics._lock:
             self.metrics.completed_jobs += 1

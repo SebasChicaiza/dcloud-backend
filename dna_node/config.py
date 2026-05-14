@@ -40,6 +40,7 @@ class Config:
     node_priority: int
     can_be_leader: bool
     leader_can_process: bool
+    provider: str  # "AWS" | "AZURE" | "GCP" | "LOCAL"
 
     # Concurrency
     worker_concurrency: int
@@ -90,6 +91,7 @@ class Config:
             node_priority=_env_int("NODE_PRIORITY", 100),
             can_be_leader=_env_bool("CAN_BE_LEADER", True),
             leader_can_process=_env_bool("LEADER_CAN_PROCESS", False),
+            provider=os.getenv("PROVIDER", "LOCAL"),
             worker_concurrency=_resolve_concurrency(raw_conc, max_concurrency),
             max_concurrency=max_concurrency,
             redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
